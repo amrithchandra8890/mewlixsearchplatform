@@ -48,8 +48,8 @@
 .bottom-section>.fact-box,.bottom-section>.surprise-box{width:100%;min-width:0;max-width:none;margin:0;box-sizing:border-box;justify-self:stretch}
 .bottom-section .fact-box>* ,.bottom-section .surprise-box>*{max-width:100%;box-sizing:border-box}
 /* A small natural sentence, not a large AI-style summary card. */
-.conversation-checkpoint{width:fit-content;max-width:min(760px,92%);margin:5px 0 18px auto;padding:5px 0 5px 11px;border:0;border-left:2px solid rgba(128,101,220,.48);border-radius:0;background:transparent;color:#777184;box-shadow:none;font-size:12px;line-height:1.5}
-@media(max-width:760px){.bottom-section{width:calc(100% - 32px);grid-template-columns:minmax(0,1fr);gap:18px;margin:32px auto 40px}.bottom-section>.fact-box,.bottom-section>.surprise-box{width:100%;min-height:0}.conversation-checkpoint{max-width:94%;font-size:11px;margin:4px 0 16px auto}}
+.last-discussed-tag{display:inline-flex;align-items:center;max-width:100%;margin:18px auto 0;padding:9px 13px;border:1px solid rgba(112,91,205,.16);border-radius:999px;background:linear-gradient(100deg,#f1edff,#fff5eb);color:#69617f;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+@media(max-width:760px){.bottom-section{width:calc(100% - 32px);grid-template-columns:minmax(0,1fr);gap:18px;margin:32px auto 40px}.bottom-section>.fact-box,.bottom-section>.surprise-box{width:100%;min-height:0}.last-discussed-tag{font-size:11px;border-radius:13px}}
 @media(max-width:600px){#topicCarousel{overflow-x:auto;touch-action:pan-x;overscroll-behavior-x:contain}#topicCarouselTrack{justify-content:flex-start!important}.carousel-description{padding:0 18px}.discovery-with-image{gap:10px}.discovery-with-image img{width:82px;height:82px;flex-basis:82px}.chat-topbar{padding:11px 12px}#chatMessages{padding:18px 12px 24px}.chat-bubble{max-width:88%}}
 
 /* Final layout correction: keep Amazing Facts and Surprise Me in one balanced row. */
@@ -207,8 +207,7 @@ async function askAI(prompt){
     if(!data.answer)throw new Error("The AI did not return an answer.");
     return data.answer;
 }
-
-/* Safe output helpers. */
+  /* Safe output helpers. */
 function escapeHTML(value){return String(value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;");}
 function formatAI(value){let html=escapeHTML(value);html=html.replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/^### (.*)$/gm,"<h4>$1</h4>").replace(/^## (.*)$/gm,"<h3>$1</h3>").replace(/^# (.*)$/gm,"<h2>$1</h2>").replace(/^\s*[-•]\s+(.*)$/gm,"<li>$1</li>");html=html.replace(/(?:<li>.*?<\/li>\s*)+/gs,m=>"<ul>"+m+"</ul>").replace(/\n\n+/g,"</p><p>").replace(/\n/g,"<br>");return "<p>"+html+"</p>";}
 function cleanTopic(value){return String(value).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9 ]/g," ").replace(/\s+/g," ").trim();}
@@ -237,7 +236,7 @@ function searchFromButton(topic){searchBox.value=topic;searchTopic();}
 async function searchTopic(){
     const query=searchBox.value.trim(),results=document.getElementById("results"),token=++latestSearchToken;hideSuggestions();
     if(!query){results.innerHTML="<div class='error-card'><h2>What are you curious about?</h2><p>Type a topic into the search box and let's learn about it.</p></div>";scrollToResults();return;}
-    results.innerHTML="<div class='loading'>🧠 MEWLIX is learning about <strong>"+escapeHTML(query)+"</strong> ...</div>";scrollToResults();activeFollowUpTopic="";activeChatHistory=[];
+    results.innerHTML="<div class='loading'>🧠 MEWLIX is learning about <strong>"+escapeHTML(query)+"</strong> ...</div>";scrollToResults();activeFollowUpTopic="";activeChatHistory=[];latestChatCheckpoint="";chatHasUserMessages=false;
     try{
         let page=await getWikipediaPage(query);if(token!==latestSearchToken)return;
         if(!page){const candidates=await getWikipediaSuggestions(query);if(token!==latestSearchToken)return;const exact=candidates.find(item=>cleanTopic(item)===cleanTopic(query));if(exact)page=await getWikipediaPage(exact);}
@@ -252,32 +251,41 @@ async function searchTopic(){
 
 /* Full-screen chat; every question remains in this same conversation. */
 const chatScreen=document.getElementById("mewlixChatScreen"),chatMessages=document.getElementById("chatMessages"),chatInput=document.getElementById("chatInput"),chatSend=document.getElementById("chatSend");
-let chatBusy=false;
+let chatBusy=false,latestChatCheckpoint="",chatHasUserMessages=false;
 function addChatMessage(role,content,isHTML=false){const row=document.createElement("div");row.className="chat-message "+role;const bubble=document.createElement("div");bubble.className="chat-bubble";if(isHTML)bubble.innerHTML=content;else bubble.textContent=content;row.appendChild(bubble);chatMessages.appendChild(row);chatMessages.scrollTop=chatMessages.scrollHeight;return row;}
 function openFollowUpChat(){if(!activeFollowUpTopic)return;document.getElementById("chatTopicLabel").textContent="Topic: "+activeFollowUpTopic;if(!chatMessages.dataset.started){chatMessages.innerHTML="<div class='chat-welcome'><div class='chat-mark'>✦</div><strong>Continue exploring "+escapeHTML(activeFollowUpTopic)+"</strong><p>Ask anything about this topic. MEWLIX will keep the conversation context.</p></div>";chatMessages.dataset.started="true";}chatScreen.style.display="flex";chatScreen.setAttribute("aria-hidden","false");requestAnimationFrame(()=>chatScreen.classList.add("open"));document.body.style.overflow="hidden";setTimeout(()=>chatInput.focus(),180);}
-function closeFollowUpChat(){chatScreen.classList.remove("open");chatScreen.setAttribute("aria-hidden","true");document.body.style.overflow="";setTimeout(()=>{if(!chatScreen.classList.contains("open"))chatScreen.style.display="none";},300);}
+function closeFollowUpChat(){
+    if(chatHasUserMessages&&latestChatCheckpoint){
+        const resultCard=document.querySelector("#results .result-card");
+        if(resultCard){
+            let tag=resultCard.querySelector(".last-discussed-tag");
+            if(!tag){tag=document.createElement("div");tag.className="last-discussed-tag";resultCard.appendChild(tag);}
+            tag.textContent="Last discussed: "+latestChatCheckpoint+" — kept in context.";
+        }
+    }
+    chatScreen.classList.remove("open");chatScreen.setAttribute("aria-hidden","true");document.body.style.overflow="";
+    setTimeout(()=>{if(!chatScreen.classList.contains("open"))chatScreen.style.display="none";},300);
+}
 async function sendChatMessage(){
     const question=chatInput.value.trim();
     if(!question||chatBusy||!activeFollowUpTopic)return;
-    chatBusy=true;chatSend.disabled=true;chatInput.value="";
+    chatBusy=true;chatHasUserMessages=true;chatSend.disabled=true;chatInput.value="";
     const welcome=chatMessages.querySelector(".chat-welcome");if(welcome)welcome.remove();
     addChatMessage("user",question);
     const typing=addChatMessage("assistant","MEWLIX is thinking...");
     try{
         const history=activeChatHistory.slice(-18).map(item=>(item.role==="user"?"Student":item.role==="checkpoint"?"Place to continue from":"MEWLIX")+": "+item.content).join("\n");
-        const reply=await askAI("You are MEWLIX AI, a friendly educational chat tutor. The original topic is '"+activeFollowUpTopic+"'. Continue this exact conversation using its history and the previous place-to-continue note. Answer the newest message directly, accurately and in age-appropriate language. Keep under 250 words unless more detail is needed. At the very end, add one short separate line in exactly this format: KEEPING OUR PLACE: [one simple sentence, maximum 20 words, saying what topic/subtopic we are discussing so the next reply can continue naturally. Do not list facts or write a long summary.].\nCONVERSATION SO FAR:\n"+history+"\nStudent: "+question+"\nMEWLIX:");
+        const reply=await askAI("You are MEWLIX AI, a friendly educational chat tutor. The original topic is '"+activeFollowUpTopic+"'. Continue this exact conversation using its history and the previous place-to-continue note. Answer the newest message directly, accurately and in age-appropriate language. Keep under 250 words unless more detail is needed. At the very end, add one short separate line in exactly this format: KEEPING OUR PLACE: [a short topic/subtopic label of 3-8 words that names what we are discussing. Do not write a sentence, list facts or make a long summary.].\nCONVERSATION SO FAR:\n"+history+"\nStudent: "+question+"\nMEWLIX:");
         typing.remove();
         const marker="KEEPING OUR PLACE:";
         const markerIndex=reply.lastIndexOf(marker);
         let answer=reply.trim(),checkpoint="";
         if(markerIndex>=0){answer=reply.slice(0,markerIndex).trim();checkpoint=reply.slice(markerIndex+marker.length).trim();}
-        if(!checkpoint)checkpoint="We are continuing our conversation about "+activeFollowUpTopic+", including your latest question about "+question+".";
+        if(!checkpoint)checkpoint=activeFollowUpTopic;
         checkpoint=checkpoint.replace(/^\[|\]$/g,"").replace(/\s+/g," ").trim();
         if(checkpoint.length>180)checkpoint=checkpoint.slice(0,177).replace(/\s+\S*$/,"")+"…";
         addChatMessage("assistant",formatAI(answer||reply),true);
-        const checkpointRow=document.createElement("div");checkpointRow.className="conversation-checkpoint";
-        checkpointRow.textContent="Just so we don't lose our place: "+checkpoint;
-        chatMessages.appendChild(checkpointRow);chatMessages.scrollTop=chatMessages.scrollHeight;
+        latestChatCheckpoint=checkpoint;
         activeChatHistory.push({role:"user",content:question},{role:"assistant",content:answer||reply},{role:"checkpoint",content:checkpoint});
         activeChatHistory=activeChatHistory.slice(-24);
     }catch(error){typing.remove();addChatMessage("assistant","Sorry, I couldn't connect just now. Please try sending that message again.");}
@@ -384,7 +392,7 @@ async function rotateExploreCards(){
         container.classList.remove("cards-fading");
         rotatingCardsBusy=false;
     }
-    if(exploreTopicPool.length-explorePoolPosition<=16)preloadExploreTopicPool();
+  if(exploreTopicPool.length-explorePoolPosition<=16)preloadExploreTopicPool();
 }
 /* AI-suggested home carousel with four topic pictures at a time. */
 let carouselTopics=["Clouds","Roman Empire","Lightning","Robot","Black hole","Dinosaur","Aurora","Octopus"],carouselPosition=0;
